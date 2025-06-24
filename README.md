@@ -1,2 +1,2 @@
 # source-repo
-Demo for Github Actions Sync - Does this sync to destination - Test 3
+This is content from source repo
