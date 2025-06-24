@@ -1,0 +1,77 @@
+name: Sync Repo
+on:
+  push:
+    branches:
+      - main
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Don't use any token here to avoid GitHub's automatic auth
+      
+      - name: Clear any existing GitHub auth
+        run: |
+          git config --global --unset-all credential.helper || true
+          git config --local --unset-all credential.helper || true
+          git config --global --remove-section credential || true
+          git config --local --remove-section credential || true
+          rm -f ~/.git-credentials
+      
+      - name: Git config
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+      
+      - name: Debug - Verify token
+        run: |
+          if [ -z "${{ secrets.SYNC_TOKEN }}" ]; then
+            echo "❌ SYNC_TOKEN is not set!"
+            exit 1
+          else
+            echo "✅ SYNC_TOKEN is configured"
+            # Test the token with API call
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: token ${{ secrets.SYNC_TOKEN }}" \
+              https://api.github.com/repos/udhayapps/destination-repo)
+            echo "API response code: $HTTP_CODE"
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Token has access to destination repo"
+            else
+              echo "❌ Token doesn't have access (HTTP $HTTP_CODE)"
+              exit 1
+            fi
+          fi
+      
+      - name: Clone destination repo with token
+        run: |
+          git clone https://x-access-token:${{ secrets.SYNC_TOKEN }}@github.com/udhayapps/destination-repo.git temp-dest
+          cd temp-dest
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+      
+      - name: Copy files and push (rsync method)
+        run: |
+          echo "=== Source files ==="
+          ls -la
+          
+          echo "=== Syncing with rsync ==="
+          rsync -av --delete --exclude='.git/' --exclude='temp-dest/' ./ temp-dest/
+          
+          echo "=== Destination after rsync ==="
+          cd temp-dest
+          ls -la
+          
+          git add .
+          git status
+          
+          if git diff --staged --quiet; then
+            echo "No changes to sync"
+          else
+            echo "Changes found, pushing..."
+            git commit -m "Sync from source repo - $(date)"
+            git push origin main
+          fi
